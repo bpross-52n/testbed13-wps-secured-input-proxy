@@ -1,3 +1,19 @@
+/*
+ * Copyright 2017-2017 52°North Initiative for Geospatial Open Source
+ * Software GmbH
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.n52.wps.execute.input.proxy;
 
 import java.io.IOException;
@@ -37,23 +53,23 @@ import net.opengis.wps.x20.CapabilitiesDocument;
 public class InputChecker {
 
     private static Logger LOGGER = LoggerFactory.getLogger(InputChecker.class);
-    
+
     private String bearerTokenReference = "urn:ogc:def:security:authentication:ietf:6750:Bearer";
-        
-    
+
+
     public boolean isApplicable(InputReference input) {
-        
+
         //try to fetch resource
         XmlObject payload = null;
-        
+
         if(input.isSetBody()){
             payload = input.getBody();
         }
-        
+
         String href = input.getHref();
-        
+
         boolean protectedResource = false;
-        
+
         try {
             protectedResource = checkIfProtectedResource(href, (payload != null ? payload.xmlText() : null));
         } catch (IOException e) {
@@ -62,42 +78,42 @@ public class InputChecker {
                 LOGGER.trace("Payload: " + payload.xmlText());
             }
         }
-        
+
         if(!protectedResource){
             return false;//strategy not applicable for unprotected resources
         }
-        
+
         //if 401 not authorized is returned (and if the service is an OWS), try to fetch capabilities
-        //if oauth2 protected, return true        
+        //if oauth2 protected, return true
         try {
             return checkIfCapabilitiesContainOAuth2Constraint(href);
         } catch (Exception e) {
             LOGGER.error("Could not check capabilities.", e);
         }
-        
+
         return false;
     }
 
-    
+
     public ReferenceInputStream fetchData(InputReference input) throws ExceptionReport {
 
         Configuration configModule = Configuration.getInstance();
-        
+
         String clientID = configModule.getClientID();
         String clientSecret = configModule.getClientSecret();
         String audience = configModule.getAudience();
         String tokenEndpointString = configModule.getTokenEndpoint();
         URL tokenEndpoint;
-        
+
         try {
             tokenEndpoint = new URL(tokenEndpointString);
         } catch (MalformedURLException e) {
             throw new ExceptionReport("Could not create URL from token_endpoint parameter: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);
         }
-        
-        //get new access token with client credentials        
+
+        //get new access token with client credentials
         String accessToken = "";
-        
+
         try {
             AccessTokenResponse accessTokenResponse = new OAuth2Client().getAccessToken(tokenEndpoint, clientID, clientSecret, audience);
             if(accessTokenResponse.isError()){
@@ -107,18 +123,18 @@ public class InputChecker {
         } catch (UnirestException | IOException e) {
             throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
         }
-        
+
         if(accessToken == null || accessToken.isEmpty()){
             throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
         }
-        
+
         //let the Thread sleep a bit, as the access token might not be valid already
         try {
             Thread.sleep(5000);
         } catch (Exception e) {
             // TODO: handle exception
         }
-        
+
         //send token to service in Authorization header
         String href = input.getHref();
         String mimeType = input.getMimeType();
@@ -188,7 +204,7 @@ public class InputChecker {
         }
 
         httppost.addHeader(new BasicHeader("Authorization", accessToken));
-        
+
         // set body entity
         HttpEntity postEntity = new StringEntity(body);
         httppost.setEntity(postEntity);
@@ -209,110 +225,110 @@ public class InputChecker {
 
         return new ReferenceInputStream(entity.getContent(), mimeType, encoding);
     }
-    
+
     private boolean checkIfCapabilitiesContainOAuth2Constraint(String originalRequest) throws Exception{
-                
+
         ServiceType serviceType = null;
-        
+
         if(originalRequest.toLowerCase().contains("wps")){
-            
+
             serviceType = ServiceType.WPS;
-            
+
         }else if(originalRequest.toLowerCase().contains("wfs")){
-            
+
             serviceType = ServiceType.WFS;
         }
-        
+
         OperationType operationType = getOperationType(originalRequest);
-        
+
         try {
             InputStream capabilitiesInputStream = requestCapabilities(originalRequest, serviceType);
 
             switch (serviceType) {
-            case WPS:            
+            case WPS:
                 CapabilitiesDocument wpsCapsDoc = CapabilitiesDocument.Factory.parse(capabilitiesInputStream);
 
                 return checkIfOperationIsProtected(wpsCapsDoc.getCapabilities().getOperationsMetadata().getOperationArray(), operationType);
-                
+
             case WFS:
                 WFSCapabilitiesDocument wfsCapsDoc = WFSCapabilitiesDocument.Factory.parse(capabilitiesInputStream);
-                                
+
                 return checkIfOperationIsProtected(wfsCapsDoc.getWFSCapabilities().getOperationsMetadata().getOperationArray(), operationType);
 
             default:
                 break;
-            } 
-            
+            }
+
         } catch (IOException e) {
             LOGGER.error("Could not request capabilities for original request:" + originalRequest);
             return false;
         }
-        
+
         return false;
     }
-    
+
     private boolean checkIfOperationIsProtected(net.opengis.ows.x11.OperationDocument.Operation[] operationArray,
             OperationType operationType) {
-        
+
         for (net.opengis.ows.x11.OperationDocument.Operation operation : operationArray) {
-            
+
             if(operation.getName().toLowerCase().equals(operationType.toString().toLowerCase())){
-                
+
                 net.opengis.ows.x11.DomainType[] constraintArray = operation.getConstraintArray();
-                
+
                 for (net.opengis.ows.x11.DomainType domainType : constraintArray) {
                     if(domainType.isSetValuesReference()){
                         net.opengis.ows.x11.ValuesReferenceDocument.ValuesReference valuesReference = domainType.getValuesReference();
-                        
+
                         String referenceValue = valuesReference.getStringValue();
-                        
+
                         if(referenceValue != null && referenceValue.equals(bearerTokenReference)){
                             return true;
                         }
-                        
+
                     }
                 }
-                
+
             }
-            
+
         }
         return false;
     }
 
     private boolean checkIfOperationIsProtected(Operation[] operationArray, OperationType operationType){
-        
+
         for (Operation operation : operationArray) {
-            
+
             if(operation.getName().toLowerCase().equals(operationType.toString().toLowerCase())){
-                
+
                 DomainType[] constraintArray = operation.getConstraintArray();
-                
+
                 for (DomainType domainType : constraintArray) {
                     if(domainType.isSetValuesReference()){
-                        
+
                         ValuesReference valuesReference = domainType.getValuesReference();
-                        
+
                         String referenceValue = valuesReference.getStringValue();
-                        
+
                         if(referenceValue != null && referenceValue.equals(bearerTokenReference)){
                             return true;
                         }
-                        
+
                     }
                 }
-                
+
             }
-            
+
         }
-        
+
         return false;
-        
+
     }
-    
+
     private OperationType getOperationType(String originalRequest) {
-        
+
         originalRequest = originalRequest.toLowerCase();
-        
+
         if(originalRequest.contains(OperationType.EXECUTE.toString().toLowerCase())){
             return OperationType.EXECUTE;
         }else if(originalRequest.contains(OperationType.DESCRIBEPROCESS.toString().toLowerCase())){
@@ -324,63 +340,63 @@ public class InputChecker {
         }else if(originalRequest.contains(OperationType.GETFEATURE.toString().toLowerCase())){
             return OperationType.GETFEATURE;
         }
-        
+
         return OperationType.UNDEFINED;
     }
 
     private String createGetCapabilitiesRequest(String originalRequest, ServiceType serviceType){
-        
+
         String capabilitiesURL = "";
-        
+
         //get index of question mark as separator between base url and request
         int indexOfQuestionmark = originalRequest.indexOf("?");
-        
+
         if(indexOfQuestionmark < 0){
             LOGGER.info("Request doesn't seem to be OWS request. It doesn't contain a question mark: " + originalRequest);
             return capabilitiesURL;
         }
-        
+
         capabilitiesURL = originalRequest.substring(0, indexOfQuestionmark + 1);
-        
+
         capabilitiesURL = capabilitiesURL.concat("request=GetCapabilities");
-        
+
         //we have to differentiate bewteen wps and wfs, because of the different version handling
         //we only will request version 2.0.0 of each service
         switch (serviceType) {
-        case WPS:            
+        case WPS:
             capabilitiesURL = capabilitiesURL.concat("&service=WPS&acceptVersions=2.0.0");
-            
+
             break;
         case WFS:
             capabilitiesURL = capabilitiesURL.concat("&service=WFS&version=2.0.0");
-            
+
             break;
 
         default:
             break;
         }
-        
+
         return capabilitiesURL;
     }
-    
+
     private InputStream requestCapabilities(String originalRequest, ServiceType serviceType) throws IOException{
-        
+
         String getCapabilitiesURL = createGetCapabilitiesRequest(originalRequest, serviceType);
-        
+
         if(getCapabilitiesURL == null || getCapabilitiesURL.isEmpty()){
             return null;
         }
-        
+
         // Send data
         URL url = new URL(getCapabilitiesURL);
 
         URLConnection conn = url.openConnection();
 
         conn.setDoOutput(true);
-        
+
         return conn.getInputStream();
     }
-    
+
     private boolean checkIfProtectedResource(String targetURL,
             String payload) throws IOException {
         // Send data
@@ -418,14 +434,14 @@ public class InputChecker {
     }
 
     enum ServiceType{
-        
+
         WPS, WFS
-        
+
     }
-    
+
     enum OperationType{
-        
+
         DESCRIBEPROCESS, EXECUTE, GETFEATURE, DESCRIBEFEATURETYPE, INSERTPROCESS, UNDEFINED
     }
-    
+
 }

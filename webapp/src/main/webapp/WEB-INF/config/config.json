@@ -1,0 +1,7 @@
+{
+  "clientID":"vnL3I6Tk1JQgSOn47SjwfTjycwv5J5Lq",
+  "clientSecret":"MrFYHqprwUQCchLoBK9HOGgXqLcZRq45l8JuJJ9XTm_Vs3oiNSnFdRfbRDfi2x0x",
+  "audience":"http://tb12.dev.52north.org/geoserver/tb13/ows",
+  "tokenEndpoint":"https://bpross-52n.eu.auth0.com/oauth/token",
+  "backendServiceURL":"http://localhost:8080/SecurityProxy/service/wps"
+}
