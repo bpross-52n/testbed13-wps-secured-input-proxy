@@ -1,0 +1,7 @@
+{
+  "clientID":"wps",
+  "clientSecret":"http://localhost:8080/wps/WebProcessingService",
+  "audience":"http://localhost:8080/SecurityProxy/service/wps",
+  "tokenEndpoint":"http://localhost:8080/SecurityProxy/service/wps"
+  "backendServiceURL":"http://localhost:8080/SecurityProxy/service/wps"
+}
