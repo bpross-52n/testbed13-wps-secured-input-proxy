@@ -17,17 +17,24 @@
 package org.n52.wps.execute.input.proxy;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.xmlbeans.XmlException;
 import org.apache.xmlbeans.XmlObject;
+import org.n52.wps.execute.input.proxy.db.FlatFileDatabase;
 import org.n52.wps.execute.input.proxy.util.Configuration;
+import org.n52.wps.execute.input.proxy.util.RequestUtil;
+import org.n52.wps.execute.input.proxy.util.StatusUtil;
 import org.n52.wps.server.ExceptionReport;
-import org.n52.wps.server.request.InputReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
@@ -36,7 +43,6 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.context.ServletConfigAware;
 import org.springframework.web.context.ServletContextAware;
 
-import net.opengis.wps.x20.DataInputType;
 import net.opengis.wps.x20.ExecuteDocument;
 
 @Controller
@@ -48,8 +54,61 @@ public class Service implements ServletContextAware, ServletConfigAware{
 
     private ServletContext ctx;
 
+    private Map<String, String> idMap;
+
     public void init(){
+        idMap = new HashMap<>();
         Configuration.getInstance(ctx.getResourceAsStream("/WEB-INF/config/config.json"));
+    }
+
+    @RequestMapping(method = RequestMethod.GET)
+    public void get(HttpServletRequest req,
+            HttpServletResponse res){
+
+        // check, whether request is GetCapabilities
+        String requestParam = RequestUtil.getParameterValue(req, "request");
+//        String queryString = req.getQueryString();
+//        String serviceParam = getParameterValue(req, "service");
+
+        if(requestParam.equals("GetStatus")){
+
+            String id = RequestUtil.getParameterValue(req, "jobid");
+
+            id = getID(id);
+
+            try {
+                InputStream statusStream = FlatFileDatabase.getInstance().lookupStatus(id);
+
+                IOUtils.copy(statusStream, res.getOutputStream());
+
+                res.setContentType("application/xml");
+
+            } catch (ExceptionReport e) {
+                LOGGER.error(e.getMessage());
+                e.printStackTrace();
+            } catch (IOException e) {
+                LOGGER.error(e.getMessage());
+            }
+
+        }else if(requestParam.equals("GetResult")){
+
+            String id = RequestUtil.getParameterValue(req, "jobid");
+
+            id = getID(id);
+
+            try {
+                InputStream statusStream = FlatFileDatabase.getInstance().lookupResponse(id);
+
+                IOUtils.copy(statusStream, res.getOutputStream());
+
+                res.setContentType("application/xml");
+
+            } catch (IOException e) {
+                LOGGER.error(e.getMessage());
+            }
+
+        }
+
     }
 
     @RequestMapping(method = RequestMethod.POST)
@@ -60,59 +119,80 @@ public class Service implements ServletContextAware, ServletConfigAware{
 
             if(postRequest instanceof ExecuteDocument){
 
-                //check inputs
-                ExecuteDocument executeDoc = (ExecuteDocument)postRequest;
+                String id = UUID.randomUUID().toString();
 
-                DataInputType[] dataInputArray = executeDoc.getExecute().getInputArray();
+                StatusUtil.updateStatusAccepted(id);
 
-                for (DataInputType dataInputType : dataInputArray) {
+                InputStream statusStream;
+                try {
+                    statusStream = FlatFileDatabase.getInstance().lookupStatus(id);
 
-                    if(dataInputType.isSetReference()){
-                        checkDataInput(dataInputType);
-                    }
+                    IOUtils.copy(statusStream, res.getOutputStream());
 
+                    res.setContentType("application/xml");
+                } catch (ExceptionReport e) {
+                    LOGGER.error("Could not return status.", e);
                 }
+
+                //store id, use same id for now
+                //will be changed after forwarding execute request
+                putID(id, id);
+
+                new Thread(){
+
+                    public void run() {
+
+                        FlatFileDatabase.getInstance().insertRequest(id, postRequest.newInputStream(), true);
+
+                        //check inputs
+                        ExecuteDocument executeDoc = (ExecuteDocument)postRequest;
+
+                        ExecuteRequest executeRequest = new ExecuteRequest(executeDoc, id);
+
+                        executeRequest.startInputCheck();
+
+//                        DataInputType[] dataInputArray = executeDoc.getExecute().getInputArray();
+//
+//                        for (DataInputType dataInputType : dataInputArray) {
+//
+//                            if(dataInputType.isSetReference()){
+//
+//                                updateStatusInputCheck(dataInputType.getId(), id);
+//
+//                                checkDataInput(dataInputType, id);
+//                            }
+//
+//                        }
+
+                    };
+
+                }.start();
 
                 //get token
 
             }
 
+//            String redirectURL = "https://bpross-52n.eu.auth0.com/authorize?scope=GetFeature&audience=http://tb12.dev.52north.org/geoserver/tb13/ows&response_type=code&client_id=DVS5yCJAYM0dahfjGSj8cnX02M1pBG4H&redirect_uri=http://localhost:8080/SecurityProxy/oauth2callback";
+//
+//            res.setStatus(303);
+//            res.addHeader("Location", redirectURL);
+
 
         } catch (XmlException | IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-    }
-
-    //checks, if data input is an protected OWS service
-    //tries to add access token to authorization header
-    private void checkDataInput(DataInputType dataInputType) {
-
-        InputReference inputReference = new InputReference(dataInputType);
-
-        InputChecker checker = null;
-        try {
-            checker = new InputChecker();
-        } catch (Exception e) {
             LOGGER.error(e.getMessage());
-            return;
-        }
-
-        if(checker.isApplicable(inputReference)){
-            try {
-                checker.fetchData(inputReference);
-            } catch (ExceptionReport e) {
-                LOGGER.error("Could not fetch input: " + dataInputType.getId(), e);
-            }
         }
     }
 
+    private synchronized void putID(String id, String mappedID){
+        idMap.put(id, mappedID);
+    }
+
+    private synchronized String getID(String id){
+        return idMap.get(id);
+    }
 
     @Override
-    public void setServletConfig(ServletConfig arg0) {
-        // TODO Auto-generated method stub
-
-    }
+    public void setServletConfig(ServletConfig arg0) {}
 
     @Override
     public void setServletContext(ServletContext arg0) {

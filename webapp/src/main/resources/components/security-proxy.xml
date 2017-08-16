@@ -22,6 +22,6 @@
                            http://www.springframework.org/schema/beans/spring-beans-4.1.xsd">
 
     <bean id="proxyServlet" class="org.n52.wps.execute.input.proxy.Service" init-method="init"/>
-    
-    <bean id="oauth2Callback" class="org.n52.wps.execute.input.proxy.Service" />
+
+    <bean id="oauth2Callback" class="org.n52.wps.execute.input.proxy.OAuth2Callback" />
 </beans>

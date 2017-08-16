@@ -29,13 +29,13 @@ import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.DecompressingHttpClient;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicHeader;
 import org.apache.xmlbeans.XmlObject;
 import org.n52.geoprocessing.oauth2.AccessTokenResponse;
 import org.n52.geoprocessing.oauth2.OAuth2Client;
 import org.n52.wps.execute.input.proxy.util.Configuration;
+import org.n52.wps.execute.input.proxy.util.RequestUtil;
 import org.n52.wps.server.ExceptionReport;
 import org.n52.wps.server.request.InputReference;
 import org.n52.wps.server.request.strategy.ReferenceInputStream;
@@ -57,7 +57,7 @@ public class InputChecker {
     private String bearerTokenReference = "urn:ogc:def:security:authentication:ietf:6750:Bearer";
 
 
-    public boolean isApplicable(InputReference input) {
+    public boolean isOAuth2Protected(InputReference input) {
 
         //try to fetch resource
         XmlObject payload = null;
@@ -94,8 +94,7 @@ public class InputChecker {
         return false;
     }
 
-
-    public ReferenceInputStream fetchData(InputReference input) throws ExceptionReport {
+    public AccessTokenResponse getAccessTokenViaClientCredentials() throws ExceptionReport, UnirestException, IOException{
 
         Configuration configModule = Configuration.getInstance();
 
@@ -111,26 +110,34 @@ public class InputChecker {
             throw new ExceptionReport("Could not create URL from token_endpoint parameter: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);
         }
 
-        //get new access token with client credentials
-        String accessToken = "";
+        AccessTokenResponse accessTokenResponse = new OAuth2Client().getAccessToken(tokenEndpoint, clientID, clientSecret, audience);
 
-        try {
-            AccessTokenResponse accessTokenResponse = new OAuth2Client().getAccessToken(tokenEndpoint, clientID, clientSecret, audience);
-            if(accessTokenResponse.isError()){
-                throw new ExceptionReport("Could not get access token URL from token_endpoint. Error: " + accessTokenResponse.getErrorCause(), ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
-            }
-            accessToken = accessTokenResponse.getAccessToken();
-        } catch (UnirestException | IOException e) {
-            throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
-        }
+//        //get new access token with client credentials
+//        String accessToken = "";
+//
+//        try {
+//            AccessTokenResponse accessTokenResponse = new OAuth2Client().getAccessToken(tokenEndpoint, clientID, clientSecret, audience);
+//            if(accessTokenResponse.isError()){
+//                throw new ExceptionReport("Could not get access token URL from token_endpoint. Error: " + accessTokenResponse.getErrorCause(), ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
+//            }
+//            accessToken = accessTokenResponse.getAccessToken();
+//        } catch (UnirestException | IOException e) {
+//            throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
+//        }
+//
+//        if(accessToken == null || accessToken.isEmpty()){
+//            throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
+//        }
 
-        if(accessToken == null || accessToken.isEmpty()){
-            throw new ExceptionReport("Could not get access token URL from token_endpoint: " + tokenEndpointString, ExceptionReport.NO_APPLICABLE_CODE);//TODO adjust exception text
-        }
+        return accessTokenResponse;
+
+    }
+
+    public ReferenceInputStream fetchData(InputReference input, String accessToken) throws ExceptionReport {
 
         //let the Thread sleep a bit, as the access token might not be valid already
         try {
-            Thread.sleep(5000);
+            Thread.sleep(60000);
         } catch (Exception e) {
             // TODO: handle exception
         }
@@ -142,12 +149,12 @@ public class InputChecker {
         try {
             if (input.isSetBody()) {
                 String body = input.getBody().toString();
-                return httpPost(href, body, mimeType, accessToken);
+                return RequestUtil.httpPost(href, body, mimeType, accessToken);
             }
 
             // Handle get request
             else {
-                return httpGet(href, mimeType, accessToken);
+                return RequestUtil.httpGet(href, mimeType, accessToken);
             }
 
         }
@@ -167,64 +174,7 @@ public class InputChecker {
         }
     }
 
-    /**
-     * Make a GET request using mimeType and href
-     *
-     * TODO: add support for autoretry, proxy
-     */
-    private ReferenceInputStream httpGet(final String dataURLString, final String mimeType, String accessToken) throws IOException {
-        HttpClient backend = new DefaultHttpClient();
-        DecompressingHttpClient httpclient = new DecompressingHttpClient(backend);
 
-        HttpGet httpget = new HttpGet(dataURLString);
-
-        if (mimeType != null){
-            httpget.addHeader(new BasicHeader("Content-type", mimeType));
-        }
-
-        httpget.addHeader(new BasicHeader("Authorization", accessToken));
-
-        return processResponse(httpclient.execute(httpget));
-    }
-
-    /**
-     * Make a POST request using mimeType and href
-     *
-     * TODO: add support for autoretry, proxy
-     */
-    private ReferenceInputStream httpPost(final String dataURLString, final String body, final String mimeType, String accessToken) throws IOException {
-        HttpClient backend = new DefaultHttpClient();
-
-        DecompressingHttpClient httpclient = new DecompressingHttpClient(backend);
-
-        HttpPost httppost = new HttpPost(dataURLString);
-
-        if (mimeType != null){
-            httppost.addHeader(new BasicHeader("Content-type", mimeType));
-        }
-
-        httppost.addHeader(new BasicHeader("Authorization", accessToken));
-
-        // set body entity
-        HttpEntity postEntity = new StringEntity(body);
-        httppost.setEntity(postEntity);
-
-        return processResponse(httpclient.execute(httppost));
-    }
-
-    private ReferenceInputStream processResponse(org.apache.http.HttpResponse response) throws IOException {
-
-        HttpEntity entity = response.getEntity();
-        org.apache.http.Header header;
-
-        header = entity.getContentType();
-        String mimeType = header == null ? null : header.getValue();
-
-        header = entity.getContentEncoding();
-        String encoding = header == null ? null : header.getValue();
-
-        return new ReferenceInputStream(entity.getContent(), mimeType, encoding);
-    }
 
     private boolean checkIfCapabilitiesContainOAuth2Constraint(String originalRequest) throws Exception{
 

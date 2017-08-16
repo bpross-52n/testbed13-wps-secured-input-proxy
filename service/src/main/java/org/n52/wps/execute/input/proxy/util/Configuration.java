@@ -35,6 +35,7 @@ public class Configuration {
     private String audience;
     private String tokenEndpoint;
     private String backendServiceURL;
+    private String redirectURL;
 
     private Configuration(InputStream configJSON) {
         parseConfig(configJSON);
@@ -68,6 +69,7 @@ public class Configuration {
             audience = root.findPath("audience").asText();
             tokenEndpoint = root.findPath("tokenEndpoint").asText();
             backendServiceURL = root.findPath("backendServiceURL").asText();
+            redirectURL = root.findPath("redirectURL").asText();
         } catch (Exception e) {
             LOGGER.error("Error while reading SecurityProxyConfiguration!");
             throw new RuntimeException("Error while reading SecurityProxyConfiguration!");
@@ -92,6 +94,10 @@ public class Configuration {
 
     public String getBackendServiceURL() {
         return backendServiceURL;
+    }
+
+    public String getRedirectUrl() {
+        return redirectURL;
     }
 
 }
